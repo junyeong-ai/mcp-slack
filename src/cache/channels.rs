@@ -414,12 +414,7 @@ mod tests {
     async fn test_search_channels_with_special_chars() {
         let cache = setup_cache().await;
         let channels = vec![create_test_channel(
-            "C123",
-            "general",
-            false,
-            false,
-            false,
-            false,
+            "C123", "general", false, false, false, false,
         )];
         cache.save_channels(channels).await.unwrap();
 
@@ -454,12 +449,16 @@ mod tests {
         let cache2 = cache.clone();
 
         let handle1 = tokio::spawn(async move {
-            let channels = vec![create_test_channel("C123", "general", false, false, false, false)];
+            let channels = vec![create_test_channel(
+                "C123", "general", false, false, false, false,
+            )];
             cache1.save_channels(channels).await
         });
 
         let handle2 = tokio::spawn(async move {
-            let channels = vec![create_test_channel("C456", "random", false, false, false, false)];
+            let channels = vec![create_test_channel(
+                "C456", "random", false, false, false, false,
+            )];
             cache2.save_channels(channels).await
         });
 

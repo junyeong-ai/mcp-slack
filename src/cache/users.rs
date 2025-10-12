@@ -277,7 +277,12 @@ mod tests {
 
         // Save new set of users (atomic swap)
         let users_v2 = vec![
-            create_test_user("U123", "alice_updated", Some("alice.new@example.com"), false),
+            create_test_user(
+                "U123",
+                "alice_updated",
+                Some("alice.new@example.com"),
+                false,
+            ),
             create_test_user("U789", "charlie", Some("charlie@example.com"), false),
         ];
         cache.save_users(users_v2).await.unwrap();
@@ -433,9 +438,12 @@ mod tests {
     #[tokio::test]
     async fn test_search_users_fts5_with_special_chars() {
         let cache = setup_cache().await;
-        let users = vec![
-            create_test_user("U123", "alice", Some("alice@example.com"), false),
-        ];
+        let users = vec![create_test_user(
+            "U123",
+            "alice",
+            Some("alice@example.com"),
+            false,
+        )];
         cache.save_users(users).await.unwrap();
 
         // Special characters are stripped by process_fts_query, so "alice*@#$" becomes "alice"
@@ -471,12 +479,22 @@ mod tests {
         let cache2 = cache.clone();
 
         let handle1 = tokio::spawn(async move {
-            let users = vec![create_test_user("U123", "alice", Some("alice@example.com"), false)];
+            let users = vec![create_test_user(
+                "U123",
+                "alice",
+                Some("alice@example.com"),
+                false,
+            )];
             cache1.save_users(users).await
         });
 
         let handle2 = tokio::spawn(async move {
-            let users = vec![create_test_user("U456", "bob", Some("bob@example.com"), false)];
+            let users = vec![create_test_user(
+                "U456",
+                "bob",
+                Some("bob@example.com"),
+                false,
+            )];
             cache2.save_users(users).await
         });
 

@@ -222,9 +222,7 @@ mod tests {
         let cache = setup_cache().await;
 
         let result: Result<()> = cache
-            .with_lock("test_lock", || {
-                Err(anyhow::anyhow!("Function failed"))
-            })
+            .with_lock("test_lock", || Err(anyhow::anyhow!("Function failed")))
             .await;
 
         assert!(result.is_err());
@@ -253,9 +251,7 @@ mod tests {
         let cache = setup_cache().await;
 
         let result: Result<()> = cache
-            .with_lock("test_lock", || {
-                Err(anyhow::anyhow!("Custom error message"))
-            })
+            .with_lock("test_lock", || Err(anyhow::anyhow!("Custom error message")))
             .await;
 
         assert!(result.is_err());
