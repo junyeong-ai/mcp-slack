@@ -1,13 +1,15 @@
 # Slack MCP Server
 
+[![CI](https://github.com/junyeong-ai/mcp-slack/workflows/CI/badge.svg)](https://github.com/junyeong-ai/mcp-slack/actions)
+[![Lint](https://github.com/junyeong-ai/mcp-slack/workflows/Lint/badge.svg)](https://github.com/junyeong-ai/mcp-slack/actions)
+[![codecov](https://codecov.io/gh/junyeong-ai/mcp-slack/branch/main/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/junyeong-ai/mcp-slack)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B%20(2024%20edition)-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
+[![MCP](https://img.shields.io/badge/MCP-2024--11--05%20%7C%202025--06--18-blue?style=flat-square)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue?style=flat-square)](https://github.com/junyeong-ai/mcp-slack/releases)
 [![Tools](https://img.shields.io/badge/MCP%20tools-8-blue?style=flat-square)](#available-tools)
-[![MCP](https://img.shields.io/badge/MCP-2025--06--18-blue?style=flat-square)](https://modelcontextprotocol.io)
-[![Test & Coverage](https://github.com/junyeong-ai/mcp-slack/actions/workflows/test.yml/badge.svg)](https://github.com/junyeong-ai/mcp-slack/actions/workflows/test.yml)
-[![codecov](https://codecov.io/gh/junyeong-ai/mcp-slack/branch/main/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/junyeong-ai/mcp-slack)
-[![Lint](https://github.com/junyeong-ai/mcp-slack/actions/workflows/lint.yml/badge.svg)](https://github.com/junyeong-ai/mcp-slack/actions/workflows/lint.yml)
+[![Tests](https://img.shields.io/badge/tests-passing-success?style=flat-square)](#testing)
+[![SQLite](https://img.shields.io/badge/SQLite-FTS5%20%7C%20WAL-003B57?style=flat-square&logo=sqlite)](https://www.sqlite.org/)
 
 > **Production-ready Model Context Protocol (MCP) server for Slack integration with SQLite caching and FTS5 full-text search.**
 
