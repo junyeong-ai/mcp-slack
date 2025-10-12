@@ -465,8 +465,24 @@ mod tests {
         let result1 = handle1.await.unwrap();
         let result2 = handle2.await.unwrap();
 
-        // Both should succeed (locking prevents conflicts)
-        assert!(result1.is_ok() || result2.is_ok());
+        // Due to distributed locking, only one should succeed at a time
+        // The second one will acquire lock after the first releases
+        // In case of high contention, one might fail after MAX_RETRIES
+        let success_count = [&result1, &result2].iter().filter(|r| r.is_ok()).count();
+
+        assert!(
+            success_count >= 1,
+            "At least one concurrent save should succeed. Results: {:?}, {:?}",
+            result1,
+            result2
+        );
+
+        // Verify the database has some data (from successful operation)
+        let all_channels = cache.get_channels().await.unwrap();
+        assert!(
+            !all_channels.is_empty(),
+            "Should have channels from successful save"
+        );
     }
 
     #[tokio::test]
