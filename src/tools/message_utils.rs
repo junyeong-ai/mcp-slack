@@ -170,11 +170,11 @@ pub async fn format_thread_messages(
     }
 
     // Remove empty strings from each message
-    if let Some(messages) = result.get_mut("messages") {
-        if let Some(messages_array) = messages.as_array_mut() {
-            for msg in messages_array {
-                remove_empty_strings(msg);
-            }
+    if let Some(messages) = result.get_mut("messages")
+        && let Some(messages_array) = messages.as_array_mut()
+    {
+        for msg in messages_array {
+            remove_empty_strings(msg);
         }
     }
 

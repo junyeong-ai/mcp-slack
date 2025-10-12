@@ -101,16 +101,17 @@ impl Tool for SearchUsersTool {
                 if user.is_bot {
                     result["is_bot"] = json!(true);
                 }
-                if let Some(real_name) = user.real_name() {
-                    if !real_name.is_empty() {
-                        result["real_name"] = json!(real_name);
-                    }
+                if let Some(real_name) = user.real_name()
+                    && !real_name.is_empty()
+                {
+                    result["real_name"] = json!(real_name);
                 }
-                if let Some(display_name) = user.display_name() {
-                    if !display_name.is_empty() && display_name != user.name {
-                        // Only include if non-empty and different from name
-                        result["display_name"] = json!(display_name);
-                    }
+                if let Some(display_name) = user.display_name()
+                    && !display_name.is_empty()
+                    && display_name != user.name
+                {
+                    // Only include if non-empty and different from name
+                    result["display_name"] = json!(display_name);
                 }
                 if user.deleted {
                     result["deleted"] = json!(true);
