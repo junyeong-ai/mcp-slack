@@ -52,3 +52,58 @@ impl SqliteCache {
         Ok(cache)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_new_sqlite_cache_in_memory() {
+        let result = SqliteCache::new(":memory:").await;
+        assert!(result.is_ok());
+
+        let cache = result.unwrap();
+        assert!(!cache.instance_id.is_empty());
+        assert!(uuid::Uuid::parse_str(&cache.instance_id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_new_sqlite_cache_creates_schema() {
+        let cache = SqliteCache::new(":memory:").await.unwrap();
+        let conn = cache.pool.get().unwrap();
+
+        // Verify tables exist
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert!(tables.contains(&"users".to_string()));
+        assert!(tables.contains(&"channels".to_string()));
+        assert!(tables.contains(&"locks".to_string()));
+        assert!(tables.contains(&"metadata".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_unique_instance_ids() {
+        let cache1 = SqliteCache::new(":memory:").await.unwrap();
+        let cache2 = SqliteCache::new(":memory:").await.unwrap();
+
+        assert_ne!(cache1.instance_id, cache2.instance_id);
+    }
+
+    #[tokio::test]
+    async fn test_pool_configuration() {
+        let cache = SqliteCache::new(":memory:").await.unwrap();
+
+        // Verify we can get multiple connections
+        let conn1 = cache.pool.get();
+        let conn2 = cache.pool.get();
+
+        assert!(conn1.is_ok());
+        assert!(conn2.is_ok());
+    }
+}
