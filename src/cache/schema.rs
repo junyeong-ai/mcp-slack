@@ -3,7 +3,7 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
 
 pub async fn initialize_schema(pool: &Pool<SqliteConnectionManager>) -> Result<()> {
     let conn = pool.get()?;
@@ -31,6 +31,8 @@ pub async fn initialize_schema(pool: &Pool<SqliteConnectionManager>) -> Result<(
             id TEXT PRIMARY KEY,
             data JSON NOT NULL,
             name TEXT GENERATED ALWAYS AS (json_extract(data, '$.name')) STORED,
+            topic TEXT GENERATED ALWAYS AS (json_extract(data, '$.topic.value')) STORED,
+            purpose TEXT GENERATED ALWAYS AS (json_extract(data, '$.purpose.value')) STORED,
             is_private INTEGER GENERATED ALWAYS AS (json_extract(data, '$.is_private')) STORED,
             is_channel INTEGER GENERATED ALWAYS AS (json_extract(data, '$.is_channel')) STORED,
             is_group INTEGER GENERATED ALWAYS AS (json_extract(data, '$.is_group')) STORED,
@@ -84,13 +86,7 @@ pub async fn initialize_schema(pool: &Pool<SqliteConnectionManager>) -> Result<(
 
         CREATE TRIGGER IF NOT EXISTS channels_ai AFTER INSERT ON channels BEGIN
             INSERT INTO channels_fts(rowid, id, name, topic, purpose)
-            VALUES (
-                new.rowid,
-                new.id,
-                new.name,
-                json_extract(new.data, '$.topic.value'),
-                json_extract(new.data, '$.purpose.value')
-            );
+            VALUES (new.rowid, new.id, new.name, new.topic, new.purpose);
         END;
 
         CREATE TRIGGER IF NOT EXISTS channels_ad AFTER DELETE ON channels BEGIN
@@ -100,13 +96,7 @@ pub async fn initialize_schema(pool: &Pool<SqliteConnectionManager>) -> Result<(
         CREATE TRIGGER IF NOT EXISTS channels_au AFTER UPDATE ON channels BEGIN
             DELETE FROM channels_fts WHERE rowid = old.rowid;
             INSERT INTO channels_fts(rowid, id, name, topic, purpose)
-            VALUES (
-                new.rowid,
-                new.id,
-                new.name,
-                json_extract(new.data, '$.topic.value'),
-                json_extract(new.data, '$.purpose.value')
-            );
+            VALUES (new.rowid, new.id, new.name, new.topic, new.purpose);
         END;
 
         -- Metadata table

@@ -83,11 +83,19 @@ pub struct ChannelPurpose {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageChannel {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlackMessage {
     pub ts: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<MessageChannel>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_ts: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

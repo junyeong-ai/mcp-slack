@@ -75,6 +75,12 @@ pub async fn format_message(
         }
     }
 
+    // Add channel information if available (from search.messages)
+    if let Some(channel) = &msg.channel {
+        result["channel_id"] = json!(channel.id);
+        result["channel_name"] = json!(channel.name);
+    }
+
     // Add thread information if requested
     if include_thread_info && let Some(thread_ts) = &msg.thread_ts {
         result["thread_ts"] = json!(thread_ts);
