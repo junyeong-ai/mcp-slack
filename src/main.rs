@@ -18,7 +18,7 @@ use crate::slack::SlackClient;
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load environment variables
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
 
     // Initialize logging
     init_logging()?;
