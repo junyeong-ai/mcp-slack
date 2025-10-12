@@ -79,6 +79,9 @@ rstest = "0.26"
 # Fake data generation
 fake = { version = "4.4", features = ["derive"] }
 
+# Serial test execution
+serial_test = "3.2"
+
 [features]
 default = []
 

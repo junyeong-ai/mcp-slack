@@ -111,3 +111,171 @@ impl Config {
         Ok(config)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use std::env;
+
+    fn setup_test_env() {
+        // Clear any existing env vars
+        unsafe {
+            env::remove_var("SLACK_BOT_TOKEN");
+            env::remove_var("SLACK_USER_TOKEN");
+        }
+    }
+
+    fn cleanup_test_env() {
+        unsafe {
+            env::remove_var("SLACK_BOT_TOKEN");
+            env::remove_var("SLACK_USER_TOKEN");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_with_bot_token() {
+        setup_test_env();
+        unsafe {
+            env::set_var("SLACK_BOT_TOKEN", "xoxb-test-token");
+        }
+
+        let result = Config::load(None, "/tmp/test.db");
+        cleanup_test_env();
+
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.slack.bot_token, Some("xoxb-test-token".to_string()));
+        assert_eq!(config.slack.user_token, None);
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_with_user_token() {
+        setup_test_env();
+        unsafe {
+            env::set_var("SLACK_USER_TOKEN", "xoxp-test-token");
+        }
+
+        let result = Config::load(None, "/tmp/test.db");
+        cleanup_test_env();
+
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.slack.user_token, Some("xoxp-test-token".to_string()));
+        assert_eq!(config.slack.bot_token, None);
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_with_both_tokens() {
+        setup_test_env();
+        unsafe {
+            env::set_var("SLACK_BOT_TOKEN", "xoxb-test-bot");
+            env::set_var("SLACK_USER_TOKEN", "xoxp-test-user");
+        }
+
+        let result = Config::load(None, "/tmp/test.db");
+        cleanup_test_env();
+
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.slack.bot_token, Some("xoxb-test-bot".to_string()));
+        assert_eq!(config.slack.user_token, Some("xoxp-test-user".to_string()));
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_without_tokens_fails() {
+        setup_test_env();
+
+        let result = Config::load(None, "/tmp/test.db");
+        cleanup_test_env();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("At least one token required: SLACK_BOT_TOKEN or SLACK_USER_TOKEN")
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_default_cache_values() {
+        setup_test_env();
+        unsafe {
+            env::set_var("SLACK_BOT_TOKEN", "xoxb-test");
+        }
+
+        let result = Config::load(None, "/tmp/test.db");
+        cleanup_test_env();
+
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.cache.data_path, "/tmp/test.db");
+        assert_eq!(config.cache.ttl_users_hours, DEFAULT_TTL_USERS_HOURS);
+        assert_eq!(config.cache.ttl_channels_hours, DEFAULT_TTL_CHANNELS_HOURS);
+        assert_eq!(config.cache.ttl_members_hours, DEFAULT_TTL_MEMBERS_HOURS);
+        assert_eq!(config.cache.compression, DEFAULT_COMPRESSION);
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_default_retry_values() {
+        setup_test_env();
+        unsafe {
+            env::set_var("SLACK_BOT_TOKEN", "xoxb-test");
+        }
+
+        let result = Config::load(None, "/tmp/test.db");
+        cleanup_test_env();
+
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.retry.max_attempts, DEFAULT_MAX_ATTEMPTS);
+        assert_eq!(config.retry.initial_delay_ms, DEFAULT_INITIAL_DELAY_MS);
+        assert_eq!(config.retry.max_delay_ms, DEFAULT_MAX_DELAY_MS);
+        assert_eq!(config.retry.exponential_base, DEFAULT_EXPONENTIAL_BASE);
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_default_connection_values() {
+        setup_test_env();
+        unsafe {
+            env::set_var("SLACK_BOT_TOKEN", "xoxb-test");
+        }
+
+        let result = Config::load(None, "/tmp/test.db");
+        cleanup_test_env();
+
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.connection.timeout_seconds, DEFAULT_TIMEOUT_SECONDS);
+        assert_eq!(
+            config.connection.max_idle_per_host,
+            DEFAULT_MAX_IDLE_PER_HOST
+        );
+        assert_eq!(
+            config.connection.pool_idle_timeout_seconds,
+            DEFAULT_POOL_IDLE_TIMEOUT_SECONDS
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_with_nonexistent_file() {
+        setup_test_env();
+        unsafe {
+            env::set_var("SLACK_BOT_TOKEN", "xoxb-test");
+        }
+
+        // Should not fail when config file doesn't exist
+        let result = Config::load(Some("/nonexistent/config.toml"), "/tmp/test.db");
+        cleanup_test_env();
+
+        assert!(result.is_ok());
+    }
+}
