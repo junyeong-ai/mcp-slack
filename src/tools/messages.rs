@@ -252,13 +252,25 @@ impl Tool for ListChannelMembersTool {
             .iter()
             .filter_map(|id| {
                 users.iter().find(|u| &u.id == id).map(|u| {
-                    json!({
+                    let mut member = json!({
                         "id": u.id,
                         "name": u.name,
-                        "real_name": u.real_name(),
-                        "is_bot": u.is_bot,
-                        "is_admin": u.is_admin,
-                    })
+                    });
+
+                    // Add optional fields
+                    if let Some(real_name) = u.real_name() {
+                        member["real_name"] = json!(real_name);
+                    }
+
+                    // Only include boolean flags when true (omit false to save tokens)
+                    if u.is_bot {
+                        member["is_bot"] = json!(true);
+                    }
+                    if u.is_admin {
+                        member["is_admin"] = json!(true);
+                    }
+
+                    member
                 })
             })
             .collect();

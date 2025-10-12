@@ -2,10 +2,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlackUserProfile {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub real_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status_emoji: Option<String>,
 }
 
@@ -51,10 +56,15 @@ pub struct SlackChannel {
     pub is_mpim: bool,
     #[serde(default)]
     pub is_member: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub created: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub creator: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub num_members: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub topic: Option<ChannelTopic>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub purpose: Option<ChannelPurpose>,
 }
 
@@ -75,18 +85,30 @@ pub struct ChannelPurpose {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlackMessage {
     pub ts: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_ts: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_users: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_users_count: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_reply: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reactions: Option<Vec<Reaction>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub subtype: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub edited: Option<EditedInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub blocks: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<serde_json::Value>>,
 }
 

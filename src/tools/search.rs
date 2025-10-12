@@ -102,13 +102,15 @@ impl Tool for SearchUsersTool {
                     result["is_bot"] = json!(true);
                 }
                 if let Some(real_name) = user.real_name() {
-                    result["real_name"] = json!(real_name);
+                    if !real_name.is_empty() {
+                        result["real_name"] = json!(real_name);
+                    }
                 }
-                if let Some(display_name) = user.display_name()
-                    && display_name != user.name
-                {
-                    // Only include if different
-                    result["display_name"] = json!(display_name);
+                if let Some(display_name) = user.display_name() {
+                    if !display_name.is_empty() && display_name != user.name {
+                        // Only include if non-empty and different from name
+                        result["display_name"] = json!(display_name);
+                    }
                 }
                 if user.deleted {
                     result["deleted"] = json!(true);
@@ -144,10 +146,12 @@ impl Tool for SearchChannelsTool {
                 let mut result = json!({
                     "id": channel.id,
                     "name": channel.name,
-                    "is_private": channel.is_private,
                 });
 
-                // Add channel type indicators
+                // Only include boolean flags when true (omit false to save tokens)
+                if channel.is_private {
+                    result["is_private"] = json!(true);
+                }
                 if channel.is_im {
                     result["is_im"] = json!(true);
                 }

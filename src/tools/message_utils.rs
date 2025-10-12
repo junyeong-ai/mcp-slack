@@ -4,6 +4,19 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+/// Remove fields with empty string values from JSON object
+fn remove_empty_strings(value: &mut Value) {
+    if let Some(obj) = value.as_object_mut() {
+        obj.retain(|_, v| {
+            if let Some(s) = v.as_str() {
+                !s.is_empty()
+            } else {
+                true
+            }
+        });
+    }
+}
+
 /// Convert Slack timestamp to ISO 8601 format
 /// Slack timestamps are Unix timestamps with microseconds (e.g., "1234567890.123456")
 fn slack_ts_to_iso8601(ts: &str) -> Option<String> {
@@ -52,20 +65,6 @@ pub async fn format_message(
         result["datetime"] = json!(iso_time);
     }
 
-    // Add blocks if present (for rich content from bots)
-    if let Some(blocks) = &msg.blocks
-        && !blocks.is_empty()
-    {
-        result["blocks"] = json!(blocks);
-    }
-
-    // Add attachments if present
-    if let Some(attachments) = &msg.attachments
-        && !attachments.is_empty()
-    {
-        result["attachments"] = json!(attachments);
-    }
-
     // Add user_id with name resolution if present
     if let Some(user_id) = msg.user {
         result["user_id"] = json!(user_id);
@@ -108,6 +107,7 @@ pub async fn format_message(
         }
     }
 
+    remove_empty_strings(&mut result);
     result
 }
 
@@ -141,18 +141,6 @@ pub async fn format_thread_messages(
             parent_info["parent_datetime"] = json!(iso_time);
         }
 
-        // Add blocks/attachments if present for parent
-        if let Some(blocks) = &first_msg.blocks
-            && !blocks.is_empty()
-        {
-            parent_info["parent_blocks"] = json!(blocks);
-        }
-        if let Some(attachments) = &first_msg.attachments
-            && !attachments.is_empty()
-        {
-            parent_info["parent_attachments"] = json!(attachments);
-        }
-
         if let Some(user_id) = &first_msg.user {
             parent_info["parent_user_id"] = json!(user_id);
             if let Ok(Some(user)) = cache.get_user_by_id(user_id).await {
@@ -169,5 +157,20 @@ pub async fn format_thread_messages(
     }
 
     result["messages"] = json!(formatted_messages);
+
+    // Remove empty strings from thread_info
+    if let Some(thread_info) = result.get_mut("thread_info") {
+        remove_empty_strings(thread_info);
+    }
+
+    // Remove empty strings from each message
+    if let Some(messages) = result.get_mut("messages") {
+        if let Some(messages_array) = messages.as_array_mut() {
+            for msg in messages_array {
+                remove_empty_strings(msg);
+            }
+        }
+    }
+
     result
 }
