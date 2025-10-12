@@ -89,3 +89,200 @@ pub async fn resolve_channel_id(
         )))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::SqliteCache;
+    use crate::slack::types::{SlackChannel, SlackUser, SlackUserProfile};
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+
+    #[derive(Debug, Deserialize, Serialize, PartialEq)]
+    struct TestParams {
+        name: String,
+        count: i32,
+    }
+
+    async fn setup_cache() -> Arc<SqliteCache> {
+        Arc::new(
+            SqliteCache::new(":memory:")
+                .await
+                .expect("Failed to create test cache"),
+        )
+    }
+
+    #[allow(dead_code)]
+    fn create_test_user(id: &str, name: &str, display_name: Option<&str>) -> SlackUser {
+        SlackUser {
+            id: id.to_string(),
+            name: name.to_string(),
+            is_bot: false,
+            is_admin: false,
+            deleted: false,
+            profile: Some(SlackUserProfile {
+                real_name: Some(name.to_string()),
+                display_name: display_name.map(|s| s.to_string()),
+                email: Some(format!("{}@example.com", name)),
+                status_text: None,
+                status_emoji: None,
+            }),
+        }
+    }
+
+    fn create_test_channel(id: &str, name: &str) -> SlackChannel {
+        SlackChannel {
+            id: id.to_string(),
+            name: name.to_string(),
+            is_channel: true,
+            is_private: false,
+            is_archived: false,
+            is_general: false,
+            is_im: false,
+            is_mpim: false,
+            is_member: true,
+            created: None,
+            creator: None,
+            topic: None,
+            purpose: None,
+            num_members: Some(10),
+        }
+    }
+
+    #[test]
+    fn test_parse_params_valid() {
+        let params = json!({"name": "test", "count": 42});
+        let result: McpResult<TestParams> = parse_params(params);
+
+        assert!(result.is_ok());
+        let parsed = result.unwrap();
+        assert_eq!(parsed.name, "test");
+        assert_eq!(parsed.count, 42);
+    }
+
+    #[test]
+    fn test_parse_params_invalid_type() {
+        let params = json!({"name": "test", "count": "not_a_number"});
+        let result: McpResult<TestParams> = parse_params(params);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, McpError::InvalidParameter(_)));
+    }
+
+    #[test]
+    fn test_parse_params_missing_field() {
+        let params = json!({"name": "test"});
+        let result: McpResult<TestParams> = parse_params(params);
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpError::InvalidParameter(_)));
+    }
+
+    #[test]
+    fn test_validate_required_one_of_both_present() {
+        let value1 = Some("value1");
+        let value2 = Some("value2");
+        let result = validate_required_one_of(&value1, &value2, "field1 or field2");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_required_one_of_first_present() {
+        let value1 = Some("value1");
+        let value2: Option<String> = None;
+        let result = validate_required_one_of(&value1, &value2, "field1 or field2");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_required_one_of_second_present() {
+        let value1: Option<String> = None;
+        let value2 = Some("value2");
+        let result = validate_required_one_of(&value1, &value2, "field1 or field2");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_required_one_of_both_none() {
+        let value1: Option<String> = None;
+        let value2: Option<String> = None;
+        let result = validate_required_one_of(&value1, &value2, "field1 or field2");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, McpError::InvalidParameter(_)));
+        assert!(err.to_string().contains("field1 or field2"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_channel_id_with_channel_id() {
+        let cache = setup_cache().await;
+
+        // Channel IDs starting with C, G, or D should be returned as-is
+        let result = resolve_channel_id("C123456", &cache, None).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "C123456");
+
+        let result = resolve_channel_id("G789ABC", &cache, None).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "G789ABC");
+
+        let result = resolve_channel_id("D456DEF", &cache, None).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "D456DEF");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_channel_id_with_channel_name() {
+        let cache = setup_cache().await;
+
+        // Save test channel
+        let channels = vec![create_test_channel("C123", "general")];
+        cache.save_channels(channels).await.unwrap();
+
+        let result = resolve_channel_id("general", &cache, None).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "C123");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_channel_id_with_hash_prefix() {
+        let cache = setup_cache().await;
+
+        let channels = vec![create_test_channel("C456", "random")];
+        cache.save_channels(channels).await.unwrap();
+
+        let result = resolve_channel_id("#random", &cache, None).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "C456");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_channel_id_not_found() {
+        let cache = setup_cache().await;
+
+        let result = resolve_channel_id("nonexistent", &cache, None).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, McpError::InvalidParameter(_)));
+        assert!(err.to_string().contains("Channel 'nonexistent' not found"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_channel_id_hash_not_found() {
+        let cache = setup_cache().await;
+
+        let result = resolve_channel_id("#missing", &cache, None).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Channel '#missing' not found")
+        );
+    }
+}
