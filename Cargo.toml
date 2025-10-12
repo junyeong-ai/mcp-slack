@@ -60,7 +60,24 @@ rusqlite = { version = "0.32", features = ["bundled", "chrono", "serde_json"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 
+[dev-dependencies]
+# Async testing (already have tokio in dependencies, add test-util feature)
+tokio = { version = "1.47", features = ["full", "test-util"] }
 
+# HTTP mocking
+wiremock = "0.6"
+
+# Trait/struct mocking
+mockall = "0.13"
+
+# Enhanced assertions
+pretty_assertions = "1.4"
+
+# Fixture-based testing
+rstest = "0.26"
+
+# Fake data generation
+fake = { version = "4.4", features = ["derive"] }
 
 [features]
 default = []
