@@ -180,3 +180,325 @@ pub async fn format_thread_messages(
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::slack::types::{MessageChannel, SlackUserProfile};
+
+    async fn setup_cache() -> Arc<SqliteCache> {
+        Arc::new(
+            SqliteCache::new(":memory:")
+                .await
+                .expect("Failed to create test cache"),
+        )
+    }
+
+    fn create_test_user(id: &str, name: &str, display_name: Option<&str>) -> SlackUser {
+        SlackUser {
+            id: id.to_string(),
+            name: name.to_string(),
+            is_bot: false,
+            is_admin: false,
+            deleted: false,
+            profile: Some(SlackUserProfile {
+                real_name: Some(name.to_string()),
+                display_name: display_name.map(|s| s.to_string()),
+                email: Some(format!("{}@example.com", name)),
+                status_text: None,
+                status_emoji: None,
+            }),
+        }
+    }
+
+    fn create_test_message(ts: &str, text: &str, user_id: Option<&str>) -> SlackMessage {
+        SlackMessage {
+            ts: ts.to_string(),
+            user: user_id.map(|s| s.to_string()),
+            text: text.to_string(),
+            channel: None,
+            thread_ts: None,
+            reply_count: None,
+            reply_users: None,
+            reply_users_count: None,
+            latest_reply: None,
+            parent_user_id: None,
+            reactions: None,
+            subtype: None,
+            edited: None,
+            blocks: None,
+            attachments: None,
+        }
+    }
+
+    // Tests for slack_ts_to_iso8601
+
+    #[test]
+    fn test_slack_ts_to_iso8601_valid() {
+        let result = slack_ts_to_iso8601("1609459200.000000");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "2021-01-01T00:00:00+00:00");
+    }
+
+    #[test]
+    fn test_slack_ts_to_iso8601_with_microseconds() {
+        let result = slack_ts_to_iso8601("1609459200.123456");
+        assert!(result.is_some());
+        let iso = result.unwrap();
+        assert!(iso.starts_with("2021-01-01T00:00:00.123"));
+    }
+
+    #[test]
+    fn test_slack_ts_to_iso8601_invalid() {
+        let result = slack_ts_to_iso8601("invalid");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_slack_ts_to_iso8601_empty() {
+        let result = slack_ts_to_iso8601("");
+        assert!(result.is_none());
+    }
+
+    // Tests for get_user_display_name
+
+    #[test]
+    fn test_get_user_display_name_prefers_display_name() {
+        let user = create_test_user("U123", "alice", Some("Alice Wonder"));
+        assert_eq!(get_user_display_name(&user), "Alice Wonder");
+    }
+
+    #[test]
+    fn test_get_user_display_name_falls_back_to_real_name() {
+        let user = create_test_user("U123", "alice", None);
+        assert_eq!(get_user_display_name(&user), "alice");
+    }
+
+    #[test]
+    fn test_get_user_display_name_falls_back_to_username() {
+        let mut user = create_test_user("U123", "alice", None);
+        if let Some(profile) = &mut user.profile {
+            profile.real_name = None;
+        }
+        assert_eq!(get_user_display_name(&user), "alice");
+    }
+
+    #[test]
+    fn test_get_user_display_name_ignores_empty_display_name() {
+        let user = create_test_user("U123", "alice", Some(""));
+        assert_eq!(get_user_display_name(&user), "alice");
+    }
+
+    #[test]
+    fn test_get_user_display_name_ignores_whitespace_only() {
+        let user = create_test_user("U123", "alice", Some("   "));
+        assert_eq!(get_user_display_name(&user), "alice");
+    }
+
+    // Tests for remove_empty_strings
+
+    #[test]
+    fn test_remove_empty_strings() {
+        let mut value = json!({
+            "field1": "value",
+            "field2": "",
+            "field3": "another value",
+            "field4": "",
+        });
+        remove_empty_strings(&mut value);
+
+        assert!(value["field1"].is_string());
+        assert!(value["field2"].is_null());
+        assert!(value["field3"].is_string());
+        assert!(value["field4"].is_null());
+    }
+
+    #[test]
+    fn test_remove_empty_strings_preserves_non_empty() {
+        let mut value = json!({
+            "text": "Hello World",
+            "number": 42,
+            "boolean": true,
+        });
+        remove_empty_strings(&mut value);
+
+        assert_eq!(value["text"], "Hello World");
+        assert_eq!(value["number"], 42);
+        assert_eq!(value["boolean"], true);
+    }
+
+    // Tests for format_message
+
+    #[tokio::test]
+    async fn test_format_message_basic() {
+        let cache = setup_cache().await;
+        let msg = create_test_message("1609459200.000000", "Hello World", None);
+
+        let result = format_message(msg, &cache, false).await;
+
+        assert_eq!(result["ts"], "1609459200.000000");
+        assert_eq!(result["text"], "Hello World");
+        assert_eq!(result["datetime"], "2021-01-01T00:00:00+00:00");
+    }
+
+    #[tokio::test]
+    async fn test_format_message_with_user() {
+        let cache = setup_cache().await;
+
+        // Add user to cache
+        let user = create_test_user("U123", "alice", Some("Alice"));
+        cache.save_users(vec![user]).await.unwrap();
+
+        let msg = create_test_message("1609459200.000000", "Hello", Some("U123"));
+
+        let result = format_message(msg, &cache, false).await;
+
+        assert_eq!(result["user_id"], "U123");
+        assert_eq!(result["user_name"], "Alice");
+    }
+
+    #[tokio::test]
+    async fn test_format_message_user_not_in_cache() {
+        let cache = setup_cache().await;
+
+        let msg = create_test_message("1609459200.000000", "Hello", Some("U999"));
+
+        let result = format_message(msg, &cache, false).await;
+
+        assert_eq!(result["user_id"], "U999");
+        assert!(result["user_name"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_format_message_with_channel() {
+        let cache = setup_cache().await;
+
+        let mut msg = create_test_message("1609459200.000000", "Hello", None);
+        msg.channel = Some(MessageChannel {
+            id: "C123".to_string(),
+            name: "general".to_string(),
+        });
+
+        let result = format_message(msg, &cache, false).await;
+
+        assert_eq!(result["channel_id"], "C123");
+        assert_eq!(result["channel_name"], "general");
+    }
+
+    #[tokio::test]
+    async fn test_format_message_thread_parent() {
+        let cache = setup_cache().await;
+
+        let mut msg = create_test_message("1609459200.000000", "Thread start", Some("U123"));
+        msg.thread_ts = Some("1609459200.000000".to_string());
+        msg.reply_count = Some(5);
+        msg.latest_reply = Some("1609459300.000000".to_string());
+
+        let result = format_message(msg, &cache, true).await;
+
+        assert_eq!(result["is_thread_parent"], true);
+        assert_eq!(result["thread_ts"], "1609459200.000000");
+        assert_eq!(result["reply_count"], 5);
+        assert_eq!(result["latest_reply"], "1609459300.000000");
+    }
+
+    #[tokio::test]
+    async fn test_format_message_thread_reply() {
+        let cache = setup_cache().await;
+
+        let mut msg = create_test_message("1609459250.000000", "Thread reply", Some("U456"));
+        msg.thread_ts = Some("1609459200.000000".to_string());
+
+        let result = format_message(msg, &cache, true).await;
+
+        assert_eq!(result["is_thread_reply"], true);
+        assert_eq!(result["thread_ts"], "1609459200.000000");
+        assert!(result["is_thread_parent"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_format_message_without_thread_info() {
+        let cache = setup_cache().await;
+
+        let mut msg = create_test_message("1609459200.000000", "Message", None);
+        msg.thread_ts = Some("1609459200.000000".to_string());
+
+        let result = format_message(msg, &cache, false).await;
+
+        // Thread info should not be included
+        assert!(result["thread_ts"].is_null());
+        assert!(result["is_thread_parent"].is_null());
+    }
+
+    // Tests for format_thread_messages
+
+    #[tokio::test]
+    async fn test_format_thread_messages_empty() {
+        let cache = setup_cache().await;
+
+        let result = format_thread_messages(vec![], &cache).await;
+
+        assert!(result["messages"].is_array());
+        assert_eq!(result["messages"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_format_thread_messages_with_parent() {
+        let cache = setup_cache().await;
+
+        // Add user to cache
+        let user = create_test_user("U123", "alice", Some("Alice"));
+        cache.save_users(vec![user]).await.unwrap();
+
+        let mut parent = create_test_message("1609459200.000000", "Parent message", Some("U123"));
+        parent.thread_ts = Some("1609459200.000000".to_string());
+
+        let mut reply = create_test_message("1609459250.000000", "Reply", Some("U123"));
+        reply.thread_ts = Some("1609459200.000000".to_string());
+
+        let result = format_thread_messages(vec![parent, reply], &cache).await;
+
+        // Should have thread_info
+        assert!(!result["thread_info"].is_null());
+        assert_eq!(result["thread_info"]["parent_ts"], "1609459200.000000");
+        assert_eq!(result["thread_info"]["parent_text"], "Parent message");
+        assert_eq!(result["thread_info"]["parent_user_id"], "U123");
+        assert_eq!(result["thread_info"]["parent_user_name"], "Alice");
+
+        // Should have 2 messages
+        assert_eq!(result["messages"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_format_thread_messages_without_parent() {
+        let cache = setup_cache().await;
+
+        let mut msg1 = create_test_message("1609459250.000000", "Reply 1", Some("U123"));
+        msg1.thread_ts = Some("1609459200.000000".to_string());
+
+        let mut msg2 = create_test_message("1609459300.000000", "Reply 2", Some("U456"));
+        msg2.thread_ts = Some("1609459200.000000".to_string());
+
+        let result = format_thread_messages(vec![msg1, msg2], &cache).await;
+
+        // Should not have thread_info (parent not included)
+        assert!(result["thread_info"].is_null());
+
+        // Should have 2 messages
+        assert_eq!(result["messages"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_format_thread_messages_removes_empty_strings() {
+        let cache = setup_cache().await;
+
+        let msg = create_test_message("1609459200.000000", "Message", None);
+
+        let result = format_thread_messages(vec![msg], &cache).await;
+
+        // Check that empty user fields are not included
+        let first_msg = &result["messages"][0];
+        assert!(first_msg["user_id"].is_null());
+        assert!(first_msg["user_name"].is_null());
+    }
+}
