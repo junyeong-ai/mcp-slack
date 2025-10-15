@@ -1,4 +1,4 @@
-use anyhow::Result;
+use super::error::{CacheError, CacheResult};
 use chrono::Utc;
 use rusqlite::params;
 
@@ -8,9 +8,9 @@ use super::sqlite_cache::SqliteCache;
 
 impl SqliteCache {
     // User operations
-    pub async fn save_users(&self, users: Vec<SlackUser>) -> Result<()> {
+    pub async fn save_users(&self, users: Vec<SlackUser>) -> CacheResult<()> {
         if users.is_empty() {
-            return Err(anyhow::anyhow!("No users to save"));
+            return Err(CacheError::InvalidInput("No users to save".to_string()));
         }
 
         self.with_lock("users_update", || {
@@ -44,7 +44,7 @@ impl SqliteCache {
             }
 
             if successful_count == 0 {
-                return Err(anyhow::anyhow!("Failed to save any users"));
+                return Err(CacheError::InvalidInput("Failed to save any users".to_string()));
             }
 
             // Atomic swap: delete old and insert from new
@@ -64,7 +64,7 @@ impl SqliteCache {
         }).await
     }
 
-    pub async fn get_users(&self) -> Result<Vec<SlackUser>> {
+    pub fn get_users(&self) -> CacheResult<Vec<SlackUser>> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare_cached(
             "SELECT data FROM users WHERE is_bot = 0 OR is_bot IS NULL ORDER BY name",
@@ -86,7 +86,7 @@ impl SqliteCache {
         Ok(users)
     }
 
-    pub async fn get_user_by_id(&self, user_id: &str) -> Result<Option<SlackUser>> {
+    pub fn get_user_by_id(&self, user_id: &str) -> CacheResult<Option<SlackUser>> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare_cached("SELECT data FROM users WHERE id = ?1")?;
 
@@ -108,7 +108,7 @@ impl SqliteCache {
         }
     }
 
-    pub async fn search_users(&self, query: &str, limit: usize) -> Result<Vec<SlackUser>> {
+    pub fn search_users(&self, query: &str, limit: usize) -> CacheResult<Vec<SlackUser>> {
         let conn = self.pool.get()?;
 
         // Handle empty or special queries
@@ -228,7 +228,10 @@ mod tests {
         let result = cache.save_users(vec![]).await;
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "No users to save");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid input: No users to save"
+        );
     }
 
     #[tokio::test]
@@ -240,7 +243,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify user was saved
-        let retrieved = cache.get_user_by_id("U123").await.unwrap();
+        let retrieved = cache.get_user_by_id("U123").unwrap();
         assert!(retrieved.is_some());
         let retrieved_user = retrieved.unwrap();
         assert_eq!(retrieved_user.id, "U123");
@@ -260,7 +263,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify all users were saved
-        let all_users = cache.get_users().await.unwrap();
+        let all_users = cache.get_users().unwrap();
         assert_eq!(all_users.len(), 3);
     }
 
@@ -288,13 +291,13 @@ mod tests {
         cache.save_users(users_v2).await.unwrap();
 
         // Verify old data replaced
-        let all_users = cache.get_users().await.unwrap();
+        let all_users = cache.get_users().unwrap();
         assert_eq!(all_users.len(), 2);
 
-        let alice = cache.get_user_by_id("U123").await.unwrap().unwrap();
+        let alice = cache.get_user_by_id("U123").unwrap().unwrap();
         assert_eq!(alice.name, "alice_updated");
 
-        let bob = cache.get_user_by_id("U456").await.unwrap();
+        let bob = cache.get_user_by_id("U456").unwrap();
         assert!(bob.is_none()); // Bob should be removed
     }
 
@@ -308,7 +311,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let human_users = cache.get_users().await.unwrap();
+        let human_users = cache.get_users().unwrap();
         assert_eq!(human_users.len(), 2);
         assert!(human_users.iter().all(|u| !u.is_bot));
     }
@@ -323,7 +326,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let sorted_users = cache.get_users().await.unwrap();
+        let sorted_users = cache.get_users().unwrap();
         assert_eq!(sorted_users.len(), 3);
         assert_eq!(sorted_users[0].name, "alice");
         assert_eq!(sorted_users[1].name, "bob");
@@ -336,7 +339,7 @@ mod tests {
         let user = create_test_user("U123", "alice", Some("alice@example.com"), false);
         cache.save_users(vec![user]).await.unwrap();
 
-        let result = cache.get_user_by_id("U123").await.unwrap();
+        let result = cache.get_user_by_id("U123").unwrap();
         assert!(result.is_some());
         let retrieved = result.unwrap();
         assert_eq!(retrieved.id, "U123");
@@ -346,7 +349,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_user_by_id_not_found() {
         let cache = setup_cache().await;
-        let result = cache.get_user_by_id("U999").await.unwrap();
+        let result = cache.get_user_by_id("U999").unwrap();
         assert!(result.is_none());
     }
 
@@ -357,7 +360,7 @@ mod tests {
         cache.save_users(vec![bot]).await.unwrap();
 
         // get_user_by_id should return bots (no filtering)
-        let result = cache.get_user_by_id("B123").await.unwrap();
+        let result = cache.get_user_by_id("B123").unwrap();
         assert!(result.is_some());
         assert!(result.unwrap().is_bot);
     }
@@ -375,7 +378,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let results = cache.search_users(query, 10).await.unwrap();
+        let results = cache.search_users(query, 10).unwrap();
         assert_eq!(results.len(), expected_count);
     }
 
@@ -388,7 +391,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let results = cache.search_users("example.com", 10).await.unwrap();
+        let results = cache.search_users("example.com", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "alice");
     }
@@ -403,7 +406,7 @@ mod tests {
         cache.save_users(users).await.unwrap();
 
         // Empty query should return all non-bot users
-        let results = cache.search_users("", 10).await.unwrap();
+        let results = cache.search_users("", 10).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -417,7 +420,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let results = cache.search_users("", 2).await.unwrap();
+        let results = cache.search_users("", 2).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -431,7 +434,7 @@ mod tests {
         cache.save_users(users).await.unwrap();
 
         // Search should not return bots
-        let results = cache.search_users("test", 10).await.unwrap();
+        let results = cache.search_users("test", 10).unwrap();
         assert_eq!(results.len(), 0);
     }
 
@@ -447,7 +450,7 @@ mod tests {
         cache.save_users(users).await.unwrap();
 
         // Special characters are stripped by process_fts_query, so "alice*@#$" becomes "alice"
-        let results = cache.search_users("alice*@#$", 10).await.unwrap();
+        let results = cache.search_users("alice*@#$", 10).unwrap();
         // Should find alice since special chars are stripped
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "alice");
@@ -463,10 +466,10 @@ mod tests {
         cache.save_users(users).await.unwrap();
 
         // FTS5 search should be case-insensitive
-        let results = cache.search_users("alice", 10).await.unwrap();
+        let results = cache.search_users("alice", 10).unwrap();
         assert_eq!(results.len(), 1);
 
-        let results = cache.search_users("bob", 10).await.unwrap();
+        let results = cache.search_users("bob", 10).unwrap();
         assert_eq!(results.len(), 1);
     }
 

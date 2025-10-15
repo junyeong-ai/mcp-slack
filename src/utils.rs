@@ -51,7 +51,7 @@ pub async fn resolve_channel_id(
     } else if identifier.starts_with('@') && slack_client.is_some() {
         // Handle @username format - resolve to DM
         let username = &identifier[1..];
-        let users = cache.get_users().await.mcp_context("Failed to get users")?;
+        let users = cache.get_users().mcp_context("Failed to get users")?;
 
         let user_id = users
             .iter()
@@ -77,7 +77,6 @@ pub async fn resolve_channel_id(
     // Search for channel by name in cache
     let channels = cache
         .search_channels(channel_name, CHANNEL_SEARCH_LIMIT)
-        .await
         .mcp_context("Failed to search channels")?;
 
     if !channels.is_empty() && channels[0].name == channel_name {

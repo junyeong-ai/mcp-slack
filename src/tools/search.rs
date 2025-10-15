@@ -85,7 +85,6 @@ impl Tool for SearchUsersTool {
         let users = self
             .cache
             .search_users(&params.query, params.limit)
-            .await
             .mcp_context("Failed to search users")?;
 
         // Format response with essential user fields
@@ -137,7 +136,6 @@ impl Tool for SearchChannelsTool {
         let channels = self
             .cache
             .search_channels(&params.query, params.limit)
-            .await
             .mcp_context("Failed to search channels")?;
 
         // Format response with useful channel fields
@@ -194,7 +192,6 @@ impl Tool for SearchMessagesTool {
                 let channels = self
                     .cache
                     .get_channels()
-                    .await
                     .mcp_context("Failed to get channels from cache")?;
 
                 channels

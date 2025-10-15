@@ -1,11 +1,12 @@
-use anyhow::Result;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 
+use super::error::CacheResult;
+
 pub const SCHEMA_VERSION: i32 = 2;
 
-pub async fn initialize_schema(pool: &Pool<SqliteConnectionManager>) -> Result<()> {
+pub async fn initialize_schema(pool: &Pool<SqliteConnectionManager>) -> CacheResult<()> {
     let conn = pool.get()?;
 
     conn.execute_batch(

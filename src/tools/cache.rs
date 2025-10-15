@@ -54,8 +54,8 @@ impl Tool for RefreshCacheTool {
         };
 
         // Check if cache needs refreshing (with minimal race condition window)
-        let (user_count, channel_count) = self.cache.get_counts().await.unwrap_or((0, 0));
-        let is_stale = self.cache.is_cache_stale(Some(1)).await.unwrap_or(true);
+        let (user_count, channel_count) = self.cache.get_counts().unwrap_or((0, 0));
+        let is_stale = self.cache.is_cache_stale(Some(1)).unwrap_or(true);
 
         // Check cache status
 

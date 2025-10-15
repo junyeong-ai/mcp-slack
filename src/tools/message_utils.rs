@@ -70,7 +70,7 @@ pub async fn format_message(
         result["user_id"] = json!(user_id);
 
         // Try to get user name from cache
-        if let Ok(Some(user)) = cache.get_user_by_id(&user_id).await {
+        if let Ok(Some(user)) = cache.get_user_by_id(&user_id) {
             result["user_name"] = json!(get_user_display_name(&user));
         }
     }
@@ -99,11 +99,11 @@ pub async fn format_message(
             {
                 result["reply_count"] = json!(reply_count);
             }
-            if let Some(latest_reply) = msg.latest_reply {
-                result["latest_reply"] = json!(latest_reply.clone());
+            if let Some(ref latest_reply) = msg.latest_reply {
+                result["latest_reply"] = json!(latest_reply);
 
                 // Add ISO 8601 formatted latest reply datetime
-                if let Some(iso_time) = slack_ts_to_iso8601(&latest_reply) {
+                if let Some(iso_time) = slack_ts_to_iso8601(latest_reply) {
                     result["latest_reply_datetime"] = json!(iso_time);
                 }
             }
@@ -149,7 +149,7 @@ pub async fn format_thread_messages(
 
         if let Some(user_id) = &first_msg.user {
             parent_info["parent_user_id"] = json!(user_id);
-            if let Ok(Some(user)) = cache.get_user_by_id(user_id).await {
+            if let Ok(Some(user)) = cache.get_user_by_id(user_id) {
                 parent_info["parent_user_name"] = json!(get_user_display_name(&user));
             }
         }

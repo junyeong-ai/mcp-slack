@@ -1,4 +1,5 @@
 mod channels;
+mod error;
 mod helpers;
 mod locks;
 mod schema;

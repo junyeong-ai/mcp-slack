@@ -87,16 +87,13 @@ impl RequestHandler {
 
         // Initialize cache if empty or stale
         if has_bot_token || has_user_token {
-            let (user_count, channel_count) = cache.get_counts().await.unwrap_or((0, 0));
+            let (user_count, channel_count) = cache.get_counts().unwrap_or((0, 0));
             // Use the minimum TTL of users and channels
             let cache_ttl_hours = _config
                 .cache
                 .ttl_users_hours
                 .min(_config.cache.ttl_channels_hours) as i64;
-            let is_stale = cache
-                .is_cache_stale(Some(cache_ttl_hours))
-                .await
-                .unwrap_or(true);
+            let is_stale = cache.is_cache_stale(Some(cache_ttl_hours)).unwrap_or(true);
 
             if (user_count == 0 && channel_count == 0) || is_stale {
                 // Cache is empty or stale, perform initial/refresh load

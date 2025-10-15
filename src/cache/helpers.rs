@@ -1,4 +1,4 @@
-use anyhow::Result;
+use super::error::CacheResult;
 use chrono::{DateTime, Utc};
 use rusqlite::OptionalExtension;
 
@@ -36,7 +36,7 @@ impl SqliteCache {
         format!("\"{}\"", cleaned)
     }
 
-    pub async fn is_cache_stale(&self, ttl_hours: Option<i64>) -> Result<bool> {
+    pub fn is_cache_stale(&self, ttl_hours: Option<i64>) -> CacheResult<bool> {
         let conn = self.pool.get()?;
         let ttl_hours = ttl_hours.unwrap_or(DEFAULT_CACHE_TTL_HOURS);
         let stale_threshold = Utc::now() - chrono::Duration::hours(ttl_hours);
@@ -82,7 +82,7 @@ impl SqliteCache {
         Ok(user_stale || channel_stale)
     }
 
-    pub async fn get_counts(&self) -> Result<(usize, usize)> {
+    pub fn get_counts(&self) -> CacheResult<(usize, usize)> {
         let conn = self.pool.get()?;
 
         let user_count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?;
@@ -187,7 +187,7 @@ mod tests {
     #[tokio::test]
     async fn test_is_cache_stale_empty_cache() {
         let cache = setup_cache().await;
-        let result = cache.is_cache_stale(None).await.unwrap();
+        let result = cache.is_cache_stale(None).unwrap();
         // Empty cache should be considered stale
         assert!(result);
     }
@@ -203,7 +203,7 @@ mod tests {
         let channels = vec![create_test_channel("C123", "general")];
         cache.save_channels(channels).await.unwrap();
 
-        let result = cache.is_cache_stale(Some(24)).await.unwrap();
+        let result = cache.is_cache_stale(Some(24)).unwrap();
         // Freshly saved cache should not be stale
         assert!(!result);
     }
@@ -219,7 +219,7 @@ mod tests {
         cache.save_channels(channels).await.unwrap();
 
         // Use default TTL (24 hours)
-        let result = cache.is_cache_stale(None).await.unwrap();
+        let result = cache.is_cache_stale(None).unwrap();
         assert!(!result);
     }
 
@@ -234,7 +234,7 @@ mod tests {
         cache.save_channels(channels).await.unwrap();
 
         // Use very short TTL (0 hours) - should be immediately stale
-        let result = cache.is_cache_stale(Some(0)).await.unwrap();
+        let result = cache.is_cache_stale(Some(0)).unwrap();
         assert!(result);
     }
 
@@ -246,7 +246,7 @@ mod tests {
         let users = vec![create_test_user("U123", "alice")];
         cache.save_users(users).await.unwrap();
 
-        let result = cache.is_cache_stale(None).await.unwrap();
+        let result = cache.is_cache_stale(None).unwrap();
         // Should be stale because channels are missing
         assert!(result);
     }
@@ -256,7 +256,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_counts_empty_cache() {
         let cache = setup_cache().await;
-        let (user_count, channel_count) = cache.get_counts().await.unwrap();
+        let (user_count, channel_count) = cache.get_counts().unwrap();
         assert_eq!(user_count, 0);
         assert_eq!(channel_count, 0);
     }
@@ -272,7 +272,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let (user_count, channel_count) = cache.get_counts().await.unwrap();
+        let (user_count, channel_count) = cache.get_counts().unwrap();
         assert_eq!(user_count, 3);
         assert_eq!(channel_count, 0);
     }
@@ -287,7 +287,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let (user_count, channel_count) = cache.get_counts().await.unwrap();
+        let (user_count, channel_count) = cache.get_counts().unwrap();
         assert_eq!(user_count, 0);
         assert_eq!(channel_count, 2);
     }
@@ -309,7 +309,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let (user_count, channel_count) = cache.get_counts().await.unwrap();
+        let (user_count, channel_count) = cache.get_counts().unwrap();
         assert_eq!(user_count, 2);
         assert_eq!(channel_count, 3);
     }
@@ -322,7 +322,7 @@ mod tests {
         let users = vec![create_test_user("U123", "alice")];
         cache.save_users(users).await.unwrap();
 
-        let (user_count, _channel_count) = cache.get_counts().await.unwrap();
+        let (user_count, _channel_count) = cache.get_counts().unwrap();
         assert_eq!(user_count, 1);
 
         // Update with more users (atomic swap)
@@ -333,7 +333,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let (user_count, channel_count) = cache.get_counts().await.unwrap();
+        let (user_count, channel_count) = cache.get_counts().unwrap();
         assert_eq!(user_count, 3);
         assert_eq!(channel_count, 0);
     }

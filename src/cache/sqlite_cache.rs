@@ -1,21 +1,20 @@
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 
+use super::error::CacheResult;
 use super::schema;
 
 #[derive(Debug, Clone)]
 pub struct SqliteCache {
-    pub(super) pool: Arc<Pool<SqliteConnectionManager>>,
+    pub(super) pool: Pool<SqliteConnectionManager>,
     pub(super) instance_id: String,
 }
 
 impl SqliteCache {
-    pub async fn new(path: impl AsRef<Path>) -> Result<Self> {
+    pub async fn new(path: impl AsRef<Path>) -> CacheResult<Self> {
         let path = path.as_ref();
 
         // Ensure parent directory exists
@@ -43,10 +42,7 @@ impl SqliteCache {
 
         let instance_id = uuid::Uuid::new_v4().to_string();
 
-        let cache = Self {
-            pool: Arc::new(pool),
-            instance_id,
-        };
+        let cache = Self { pool, instance_id };
 
         schema::initialize_schema(&cache.pool).await?;
         Ok(cache)

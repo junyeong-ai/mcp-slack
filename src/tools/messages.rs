@@ -241,11 +241,7 @@ impl Tool for ListChannelMembersTool {
             .mcp_context("Failed to get channel members")?;
 
         // Get user details from cache
-        let users = self
-            .cache
-            .get_users()
-            .await
-            .mcp_context("Failed to get users")?;
+        let users = self.cache.get_users().mcp_context("Failed to get users")?;
 
         // Match member IDs with user details
         let members: Vec<Value> = member_ids

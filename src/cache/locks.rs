@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use super::error::{CacheError, CacheResult};
 use rusqlite::params;
 use tracing::warn;
 
@@ -12,7 +12,7 @@ const INITIAL_BACKOFF_MS: u64 = 500;
 
 impl SqliteCache {
     // Lock management for multi-instance coordination
-    pub(super) async fn acquire_lock(&self, key: &str) -> Result<()> {
+    pub(super) async fn acquire_lock(&self, key: &str) -> CacheResult<()> {
         let mut backoff = Duration::from_millis(INITIAL_BACKOFF_MS);
 
         for attempt in 0..MAX_RETRIES {
@@ -70,13 +70,13 @@ impl SqliteCache {
             }
         }
 
-        Err(anyhow::anyhow!(
-            "Failed to acquire lock after {} attempts",
-            MAX_RETRIES
-        ))
+        Err(CacheError::LockAcquisitionFailed {
+            key: key.to_string(),
+            attempts: MAX_RETRIES as usize,
+        })
     }
 
-    pub(super) async fn release_lock(&self, key: &str) -> Result<()> {
+    pub(super) async fn release_lock(&self, key: &str) -> CacheResult<()> {
         let conn = self.pool.get()?;
         conn.execute(
             "DELETE FROM locks WHERE key = ? AND instance_id = ?",
@@ -85,9 +85,9 @@ impl SqliteCache {
         Ok(())
     }
 
-    pub async fn with_lock<F, R>(&self, key: &str, f: F) -> Result<R>
+    pub async fn with_lock<F, R>(&self, key: &str, f: F) -> CacheResult<R>
     where
-        F: FnOnce() -> Result<R>,
+        F: FnOnce() -> CacheResult<R>,
     {
         self.acquire_lock(key).await?;
 
@@ -221,8 +221,10 @@ mod tests {
     async fn test_with_lock_releases_on_error() {
         let cache = setup_cache().await;
 
-        let result: Result<()> = cache
-            .with_lock("test_lock", || Err(anyhow::anyhow!("Function failed")))
+        let result: CacheResult<()> = cache
+            .with_lock("test_lock", || {
+                Err(CacheError::InvalidInput("Function failed".to_string()))
+            })
             .await;
 
         assert!(result.is_err());
@@ -250,12 +252,17 @@ mod tests {
     async fn test_with_lock_function_error_propagated() {
         let cache = setup_cache().await;
 
-        let result: Result<()> = cache
-            .with_lock("test_lock", || Err(anyhow::anyhow!("Custom error message")))
+        let result: CacheResult<()> = cache
+            .with_lock("test_lock", || {
+                Err(CacheError::InvalidInput("Custom error message".to_string()))
+            })
             .await;
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Custom error message");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid input: Custom error message"
+        );
     }
 
     #[tokio::test]

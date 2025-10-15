@@ -122,18 +122,24 @@ impl SlackCore {
                         if let Some(obj) = params.as_object() {
                             for (key, value) in obj {
                                 let text_value = match value {
-                                    Value::String(s) => s.clone(),
-                                    _ => value.to_string().trim_matches('"').to_string(),
+                                    Value::String(s) => s.to_string(),
+                                    Value::Number(n) => n.to_string(),
+                                    Value::Bool(b) => b.to_string(),
+                                    _ => {
+                                        let s = value.to_string();
+                                        s.trim_matches('"').to_owned()
+                                    }
                                 };
-                                form = form.text(key.clone(), text_value);
+                                form = form.text(key.to_string(), text_value);
                             }
                         }
 
                         // Add files
                         for (field_name, file_data) in files {
+                            let field_name_str = field_name.to_string();
                             let part = reqwest::multipart::Part::bytes(file_data.clone())
-                                .file_name(field_name.to_string());
-                            form = form.part(field_name.to_string(), part);
+                                .file_name(field_name_str.clone());
+                            form = form.part(field_name_str, part);
                         }
 
                         self.http_client

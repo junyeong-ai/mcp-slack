@@ -1,4 +1,4 @@
-use anyhow::Result;
+use super::error::{CacheError, CacheResult};
 use chrono::Utc;
 use rusqlite::params;
 
@@ -8,9 +8,9 @@ use super::sqlite_cache::SqliteCache;
 
 impl SqliteCache {
     // Channel operations
-    pub async fn save_channels(&self, channels: Vec<SlackChannel>) -> Result<()> {
+    pub async fn save_channels(&self, channels: Vec<SlackChannel>) -> CacheResult<()> {
         if channels.is_empty() {
-            return Err(anyhow::anyhow!("No channels to save"));
+            return Err(CacheError::InvalidInput("No channels to save".to_string()));
         }
 
         self.with_lock("channels_update", || {
@@ -44,7 +44,7 @@ impl SqliteCache {
             }
 
             if successful_count == 0 {
-                return Err(anyhow::anyhow!("Failed to save any channels"));
+                return Err(CacheError::InvalidInput("Failed to save any channels".to_string()));
             }
 
             // Atomic swap: delete old and insert from new
@@ -64,7 +64,7 @@ impl SqliteCache {
         }).await
     }
 
-    pub async fn get_channels(&self) -> Result<Vec<SlackChannel>> {
+    pub fn get_channels(&self) -> CacheResult<Vec<SlackChannel>> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare_cached(
             "SELECT data FROM channels WHERE is_archived = 0 OR is_archived IS NULL ORDER BY name",
@@ -86,7 +86,7 @@ impl SqliteCache {
         Ok(channels)
     }
 
-    pub async fn search_channels(&self, query: &str, limit: usize) -> Result<Vec<SlackChannel>> {
+    pub fn search_channels(&self, query: &str, limit: usize) -> CacheResult<Vec<SlackChannel>> {
         let conn = self.pool.get()?;
 
         // Handle empty or special queries
@@ -216,7 +216,10 @@ mod tests {
         let result = cache.save_channels(vec![]).await;
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "No channels to save");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid input: No channels to save"
+        );
     }
 
     #[tokio::test]
@@ -228,7 +231,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify channel was saved
-        let channels = cache.get_channels().await.unwrap();
+        let channels = cache.get_channels().unwrap();
         assert_eq!(channels.len(), 1);
         assert_eq!(channels[0].id, "C123");
         assert_eq!(channels[0].name, "general");
@@ -246,7 +249,7 @@ mod tests {
         let result = cache.save_channels(channels).await;
         assert!(result.is_ok());
 
-        let all_channels = cache.get_channels().await.unwrap();
+        let all_channels = cache.get_channels().unwrap();
         assert_eq!(all_channels.len(), 3);
     }
 
@@ -269,7 +272,7 @@ mod tests {
         cache.save_channels(channels_v2).await.unwrap();
 
         // Verify old data replaced
-        let all_channels = cache.get_channels().await.unwrap();
+        let all_channels = cache.get_channels().unwrap();
         assert_eq!(all_channels.len(), 2);
 
         let general = all_channels.iter().find(|c| c.id == "C123").unwrap();
@@ -289,7 +292,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let active_channels = cache.get_channels().await.unwrap();
+        let active_channels = cache.get_channels().unwrap();
         assert_eq!(active_channels.len(), 2);
         assert!(active_channels.iter().all(|c| !c.is_archived));
     }
@@ -304,7 +307,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let sorted_channels = cache.get_channels().await.unwrap();
+        let sorted_channels = cache.get_channels().unwrap();
         assert_eq!(sorted_channels.len(), 3);
         assert_eq!(sorted_channels[0].name, "alpha");
         assert_eq!(sorted_channels[1].name, "beta");
@@ -320,7 +323,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let all_channels = cache.get_channels().await.unwrap();
+        let all_channels = cache.get_channels().unwrap();
         assert_eq!(all_channels.len(), 2);
     }
 
@@ -334,7 +337,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let all_channels = cache.get_channels().await.unwrap();
+        let all_channels = cache.get_channels().unwrap();
         assert_eq!(all_channels.len(), 3);
     }
 
@@ -351,7 +354,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let results = cache.search_channels(query, 10).await.unwrap();
+        let results = cache.search_channels(query, 10).unwrap();
         assert_eq!(results.len(), expected_count);
     }
 
@@ -365,7 +368,7 @@ mod tests {
         cache.save_channels(channels).await.unwrap();
 
         // Empty query should return all non-archived channels
-        let results = cache.search_channels("", 10).await.unwrap();
+        let results = cache.search_channels("", 10).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -379,7 +382,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let results = cache.search_channels("", 2).await.unwrap();
+        let results = cache.search_channels("", 2).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -393,7 +396,7 @@ mod tests {
         cache.save_channels(channels).await.unwrap();
 
         // Search should not return archived channels
-        let results = cache.search_channels("test", 10).await.unwrap();
+        let results = cache.search_channels("test", 10).unwrap();
         assert_eq!(results.len(), 0);
     }
 
@@ -406,7 +409,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let results = cache.search_channels("channel", 10).await.unwrap();
+        let results = cache.search_channels("channel", 10).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -419,7 +422,7 @@ mod tests {
         cache.save_channels(channels).await.unwrap();
 
         // Special characters are stripped by process_fts_query
-        let results = cache.search_channels("general*@#$", 10).await.unwrap();
+        let results = cache.search_channels("general*@#$", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "general");
     }
@@ -434,10 +437,10 @@ mod tests {
         cache.save_channels(channels).await.unwrap();
 
         // FTS5 search should be case-insensitive
-        let results = cache.search_channels("general", 10).await.unwrap();
+        let results = cache.search_channels("general", 10).unwrap();
         assert_eq!(results.len(), 1);
 
-        let results = cache.search_channels("random", 10).await.unwrap();
+        let results = cache.search_channels("random", 10).unwrap();
         assert_eq!(results.len(), 1);
     }
 
@@ -478,7 +481,7 @@ mod tests {
         );
 
         // Verify the database has some data (from successful operation)
-        let all_channels = cache.get_channels().await.unwrap();
+        let all_channels = cache.get_channels().unwrap();
         assert!(
             !all_channels.is_empty(),
             "Should have channels from successful save"
@@ -496,7 +499,7 @@ mod tests {
         ];
         cache.save_channels(channels).await.unwrap();
 
-        let all_channels = cache.get_channels().await.unwrap();
+        let all_channels = cache.get_channels().unwrap();
         assert_eq!(all_channels.len(), 4);
 
         let public = all_channels.iter().find(|c| c.id == "C123").unwrap();
