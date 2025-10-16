@@ -108,17 +108,27 @@ impl SqliteCache {
         }
     }
 
-    pub fn search_users(&self, query: &str, limit: usize) -> CacheResult<Vec<SlackUser>> {
+    pub fn search_users(
+        &self,
+        query: &str,
+        limit: usize,
+        include_bots: bool,
+    ) -> CacheResult<Vec<SlackUser>> {
         let conn = self.pool.get()?;
 
         // Handle empty or special queries
-        let processed_query = self.process_fts_query(query);
-
-        if processed_query.is_empty() {
+        if query.trim().is_empty() {
             // Return all users for empty query
-            let mut stmt = conn.prepare_cached(
-                "SELECT data FROM users WHERE is_bot = 0 OR is_bot IS NULL ORDER BY name LIMIT ?1",
-            )?;
+            let bot_filter = if include_bots {
+                ""
+            } else {
+                "WHERE is_bot = 0 OR is_bot IS NULL"
+            };
+            let sql = format!(
+                "SELECT data FROM users {} ORDER BY name LIMIT ?1",
+                bot_filter
+            );
+            let mut stmt = conn.prepare_cached(&sql)?;
 
             let users = stmt
                 .query_map(params![limit], |row| {
@@ -136,59 +146,80 @@ impl SqliteCache {
             return Ok(users);
         }
 
-        // Try FTS5 search first
-        let fts_result = conn
-            .prepare_cached(
-                "SELECT u.data
+        // Phase 1: LIKE substring match with exact match priority
+        let bot_filter = if include_bots {
+            ""
+        } else {
+            "AND (is_bot = 0 OR is_bot IS NULL)"
+        };
+
+        let like_sql = format!(
+            "SELECT data,
+                CASE
+                    WHEN lower(name) = lower(?1) THEN 0
+                    WHEN lower(display_name) = lower(?1) THEN 1
+                    WHEN lower(real_name) = lower(?1) THEN 2
+                    ELSE 3
+                END as priority
+             FROM users
+             WHERE 1=1 {}
+             AND (name LIKE ?2 OR display_name LIKE ?2 OR real_name LIKE ?2 OR email LIKE ?2)
+             ORDER BY priority, name
+             LIMIT ?3",
+            bot_filter
+        );
+
+        let like_pattern = format!("%{query}%");
+        let like_result = conn.prepare_cached(&like_sql).and_then(|mut stmt| {
+            stmt.query_map(params![query, like_pattern, limit], |row| {
+                let json: String = row.get(0)?;
+                serde_json::from_str(&json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+        })?;
+
+        if !like_result.is_empty() {
+            return Ok(like_result);
+        }
+
+        // Phase 2: FTS5 fuzzy match (only if no LIKE results)
+        let processed_query = self.process_fts_query(query);
+        if processed_query.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let fts_sql = format!(
+            "SELECT u.data
              FROM users u
              JOIN users_fts f ON u.rowid = f.rowid
              WHERE users_fts MATCH ?1
+             {}
              ORDER BY rank
              LIMIT ?2",
-            )
-            .and_then(|mut stmt| {
-                stmt.query_map(params![&processed_query, limit], |row| {
-                    let json: String = row.get(0)?;
-                    serde_json::from_str(&json).map_err(|e| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            0,
-                            rusqlite::types::Type::Text,
-                            Box::new(e),
-                        )
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()
-            });
+            bot_filter
+        );
 
-        match fts_result {
-            Ok(users) => Ok(users),
-            Err(_) => {
-                // Fallback to LIKE search if FTS5 fails
-                let mut stmt = conn.prepare_cached(
-                    "SELECT data FROM users
-                     WHERE (is_bot = 0 OR is_bot IS NULL)
-                     AND (name LIKE ?1 OR display_name LIKE ?1 OR real_name LIKE ?1 OR email LIKE ?1)
-                     ORDER BY name
-                     LIMIT ?2"
-                )?;
+        let fts_result = conn.prepare_cached(&fts_sql).and_then(|mut stmt| {
+            stmt.query_map(params![processed_query, limit], |row| {
+                let json: String = row.get(0)?;
+                serde_json::from_str(&json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+        })?;
 
-                let like_query = format!("%{}%", query);
-                let users = stmt
-                    .query_map(params![like_query, limit], |row| {
-                        let json: String = row.get(0)?;
-                        serde_json::from_str(&json).map_err(|e| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                0,
-                                rusqlite::types::Type::Text,
-                                Box::new(e),
-                            )
-                        })
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                Ok(users)
-            }
-        }
+        Ok(fts_result)
     }
 }
 
@@ -207,9 +238,9 @@ mod tests {
             is_admin: false,
             deleted: false,
             profile: Some(SlackUserProfile {
-                real_name: Some(format!("Real {}", name)),
+                real_name: Some(format!("Real {name}")),
                 display_name: Some(name.to_string()),
-                email: email.map(|e| e.to_string()),
+                email: email.map(std::string::ToString::to_string),
                 status_text: None,
                 status_emoji: None,
             }),
@@ -378,7 +409,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let results = cache.search_users(query, 10).unwrap();
+        let results = cache.search_users(query, 10, false).unwrap();
         assert_eq!(results.len(), expected_count);
     }
 
@@ -391,7 +422,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let results = cache.search_users("example.com", 10).unwrap();
+        let results = cache.search_users("example.com", 10, false).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "alice");
     }
@@ -406,7 +437,7 @@ mod tests {
         cache.save_users(users).await.unwrap();
 
         // Empty query should return all non-bot users
-        let results = cache.search_users("", 10).unwrap();
+        let results = cache.search_users("", 10, false).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -420,7 +451,7 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        let results = cache.search_users("", 2).unwrap();
+        let results = cache.search_users("", 2, false).unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -433,8 +464,8 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        // Search should not return bots
-        let results = cache.search_users("test", 10).unwrap();
+        // Search should not return bots by default
+        let results = cache.search_users("test", 10, false).unwrap();
         assert_eq!(results.len(), 0);
     }
 
@@ -450,7 +481,7 @@ mod tests {
         cache.save_users(users).await.unwrap();
 
         // Special characters are stripped by process_fts_query, so "alice*@#$" becomes "alice"
-        let results = cache.search_users("alice*@#$", 10).unwrap();
+        let results = cache.search_users("alice*@#$", 10, false).unwrap();
         // Should find alice since special chars are stripped
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "alice");
@@ -465,12 +496,83 @@ mod tests {
         ];
         cache.save_users(users).await.unwrap();
 
-        // FTS5 search should be case-insensitive
-        let results = cache.search_users("alice", 10).unwrap();
+        // LIKE search should be case-insensitive
+        let results = cache.search_users("alice", 10, false).unwrap();
         assert_eq!(results.len(), 1);
 
-        let results = cache.search_users("bob", 10).unwrap();
+        let results = cache.search_users("bob", 10, false).unwrap();
         assert_eq!(results.len(), 1);
+    }
+
+    // New test: Exact match priority
+    #[tokio::test]
+    async fn test_search_users_exact_match_priority() {
+        let cache = setup_cache().await;
+        let users = vec![
+            create_test_user("U123", "john", Some("john@example.com"), false),
+            create_test_user("U456", "john.smith", Some("john.smith@example.com"), false),
+            create_test_user("U789", "johnny", Some("johnny@example.com"), false),
+        ];
+        cache.save_users(users).await.unwrap();
+
+        let results = cache.search_users("john", 10, false).unwrap();
+        // Exact match "john" should be first
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].name, "john");
+    }
+
+    // New test: Include bots option
+    #[tokio::test]
+    async fn test_search_users_with_include_bots() {
+        let cache = setup_cache().await;
+        let users = vec![
+            create_test_user("U123", "alice", Some("alice@example.com"), false),
+            create_test_user("B456", "testbot", None, true),
+        ];
+        cache.save_users(users).await.unwrap();
+
+        // With include_bots=true, should return bots
+        let results = cache.search_users("test", 10, true).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "testbot");
+        assert!(results[0].is_bot);
+    }
+
+    // New test: Substring before FTS5
+    #[tokio::test]
+    async fn test_search_users_substring_before_fuzzy() {
+        let cache = setup_cache().await;
+        let users = vec![
+            create_test_user("U123", "junyeong.eom", Some("junyeong@example.com"), false),
+            create_test_user(
+                "U456",
+                "seungryoung.lee",
+                Some("seungryoung@example.com"),
+                false,
+            ),
+        ];
+        cache.save_users(users).await.unwrap();
+
+        // "junyeong" should match "junyeong.eom" via LIKE, not FTS5
+        // so "seungryoung.lee" should not appear
+        let results = cache.search_users("junyeong", 10, false).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "junyeong.eom");
+    }
+
+    // New test: FTS5 fallback when no LIKE results
+    #[tokio::test]
+    async fn test_search_users_fallback_to_fts5() {
+        let cache = setup_cache().await;
+        let users = vec![
+            create_test_user("U123", "alice", Some("alice@example.com"), false),
+            create_test_user("U456", "alicia", Some("alicia@example.com"), false),
+        ];
+        cache.save_users(users).await.unwrap();
+
+        // "xyz" has no LIKE match, should fall back to FTS5 and return empty
+        let results = cache.search_users("xyz", 10, false).unwrap();
+        assert_eq!(results.len(), 0);
     }
 
     #[tokio::test]

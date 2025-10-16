@@ -6,7 +6,7 @@ AI assistant documentation for the Slack MCP Server project.
 
 **What**: Rust-based MCP server for Slack integration with SQLite caching, FTS5 search, and distributed locking.
 **Stack**: Rust 2024 (requires 1.90+), Tokio async, SQLite with WAL, r2d2 pooling
-**Tests**: `cargo test` (140 tests)
+**Tests**: `cargo test` (147 tests)
 **Build**: `cargo build --release`
 
 ### Project Structure
@@ -144,9 +144,9 @@ pub fn process_fts_query(&self, query: &str) -> String {
 }
 ```
 
-**Search Flow**:
-1. Try FTS5 with sanitized query
-2. On error, fallback to LIKE search
+**Search Flow** (2-phase strategy):
+1. Phase 1: LIKE substring match with exact match priority (0-3)
+2. Phase 2: FTS5 fuzzy match (only if Phase 1 returns no results)
 3. Return sorted results
 
 ### Distributed Locking
@@ -179,7 +179,7 @@ self.with_lock("key", || {
 **users.rs / channels.rs**: Entity operations
 - `save_*()` - Atomic swap with distributed lock (async)
 - `get_*()` - Simple SELECT (NOT async)
-- `search_*()` - FTS5 → LIKE fallback (NOT async)
+- `search_*()` - 2-phase: LIKE substring → FTS5 fuzzy (NOT async)
 
 **locks.rs**: Distributed locking
 - `acquire_lock()` - 3 retries with exponential backoff
@@ -258,7 +258,7 @@ pub trait Tool {
 
 ### Testing
 ```bash
-cargo test                              # All 140 tests
+cargo test                              # All 147 tests
 cargo test cache::users::tests          # Specific module
 cargo test -- --nocapture               # Show println! output
 RUST_LOG=debug cargo test              # With logging
@@ -414,5 +414,5 @@ max_idle_per_host = 10
 ---
 
 **Version**: 0.1.0 (Rust 2024 edition, requires 1.90+)
-**Tests**: 140 passing
+**Tests**: 147 passing
 **Documentation**: See README.md for usage, DEVELOPMENT.md for contributing

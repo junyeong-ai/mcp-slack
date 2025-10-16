@@ -90,18 +90,15 @@ impl SqliteCache {
         let conn = self.pool.get()?;
 
         // Handle empty or special queries
-        let processed_query = self.process_fts_query(query);
+        if query.trim().is_empty() {
+            // Return all non-archived channels for empty query
+            let mut stmt = conn.prepare_cached(
+                "SELECT data FROM channels
+                 WHERE (is_archived = 0 OR is_archived IS NULL)
+                 ORDER BY name
+                 LIMIT ?1",
+            )?;
 
-        // Include all channels (public and private) in search results
-
-        if processed_query.is_empty() {
-            // Return all channels for empty query
-            let sql = "SELECT data FROM channels
-                       WHERE (is_archived = 0 OR is_archived IS NULL)
-                       ORDER BY name
-                       LIMIT ?1";
-
-            let mut stmt = conn.prepare_cached(sql)?;
             let channels = stmt
                 .query_map(params![limit], |row| {
                     let json: String = row.get(0)?;
@@ -118,57 +115,70 @@ impl SqliteCache {
             return Ok(channels);
         }
 
-        // Try FTS5 search first
-        let fts_sql = "SELECT c.data
-                        FROM channels c
-                        JOIN channels_fts f ON c.rowid = f.rowid
-                        WHERE channels_fts MATCH ?1
-                        AND (c.is_archived = 0 OR c.is_archived IS NULL)
-                        ORDER BY rank
-                        LIMIT ?2";
+        // Phase 1: LIKE substring match on channel name with exact match priority
+        let like_pattern = format!("%{query}%");
+        let like_result = conn
+            .prepare_cached(
+                "SELECT data,
+                CASE
+                    WHEN lower(name) = lower(?1) THEN 0
+                    ELSE 1
+                END as priority
+             FROM channels
+             WHERE (is_archived = 0 OR is_archived IS NULL)
+             AND name LIKE ?2
+             ORDER BY priority, name
+             LIMIT ?3",
+            )
+            .and_then(|mut stmt| {
+                stmt.query_map(params![query, like_pattern, limit], |row| {
+                    let json: String = row.get(0)?;
+                    serde_json::from_str(&json).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()
+            })?;
 
-        let fts_result = conn.prepare_cached(fts_sql).and_then(|mut stmt| {
-            stmt.query_map(params![&processed_query, limit], |row| {
-                let json: String = row.get(0)?;
-                serde_json::from_str(&json).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        0,
-                        rusqlite::types::Type::Text,
-                        Box::new(e),
-                    )
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()
-        });
-
-        match fts_result {
-            Ok(channels) => Ok(channels),
-            Err(_) => {
-                // Fallback to LIKE search if FTS5 fails
-                let fallback_sql = "SELECT data FROM channels
-                                     WHERE (is_archived = 0 OR is_archived IS NULL)
-                                     AND name LIKE ?1
-                                     ORDER BY name
-                                     LIMIT ?2";
-
-                let mut stmt = conn.prepare_cached(fallback_sql)?;
-                let like_query = format!("%{}%", query);
-                let channels = stmt
-                    .query_map(params![like_query, limit], |row| {
-                        let json: String = row.get(0)?;
-                        serde_json::from_str(&json).map_err(|e| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                0,
-                                rusqlite::types::Type::Text,
-                                Box::new(e),
-                            )
-                        })
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                Ok(channels)
-            }
+        if !like_result.is_empty() {
+            return Ok(like_result);
         }
+
+        // Phase 2: FTS5 fuzzy match (name, topic, purpose) - only if no LIKE results
+        let processed_query = self.process_fts_query(query);
+        if processed_query.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let fts_result = conn
+            .prepare_cached(
+                "SELECT c.data
+             FROM channels c
+             JOIN channels_fts f ON c.rowid = f.rowid
+             WHERE channels_fts MATCH ?1
+             AND (c.is_archived = 0 OR c.is_archived IS NULL)
+             ORDER BY rank
+             LIMIT ?2",
+            )
+            .and_then(|mut stmt| {
+                stmt.query_map(params![processed_query, limit], |row| {
+                    let json: String = row.get(0)?;
+                    serde_json::from_str(&json).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()
+            })?;
+
+        Ok(fts_result)
     }
 }
 
@@ -523,5 +533,55 @@ mod tests {
         assert!(mpdm.is_mpim);
         assert!(!mpdm.is_channel);
         assert!(!mpdm.is_im);
+    }
+
+    // New test: Exact match priority for channels
+    #[tokio::test]
+    async fn test_search_channels_exact_match_priority() {
+        let cache = setup_cache().await;
+        let channels = vec![
+            create_test_channel("C123", "general", false, false, false, false),
+            create_test_channel("C456", "general-korea", false, false, false, false),
+            create_test_channel("C789", "general-dev", false, false, false, false),
+        ];
+        cache.save_channels(channels).await.unwrap();
+
+        let results = cache.search_channels("general", 10).unwrap();
+        // Exact match "general" should be first
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].name, "general");
+    }
+
+    // New test: Channel name before topic/purpose
+    #[tokio::test]
+    async fn test_search_channels_name_before_topic() {
+        let cache = setup_cache().await;
+        let channels = vec![
+            create_test_channel("C123", "dev-team", false, false, false, false),
+            create_test_channel("C456", "dev-backend", false, false, false, false),
+        ];
+        cache.save_channels(channels).await.unwrap();
+
+        // "dev" should match channel names via LIKE, not fall through to FTS5
+        let results = cache.search_channels("dev", 10).unwrap();
+        assert_eq!(results.len(), 2);
+        // Results should be sorted by name after priority
+        assert!(results.iter().any(|c| c.name == "dev-team"));
+        assert!(results.iter().any(|c| c.name == "dev-backend"));
+    }
+
+    // New test: FTS5 fallback for channels
+    #[tokio::test]
+    async fn test_search_channels_fallback_to_fts5() {
+        let cache = setup_cache().await;
+        let channels = vec![
+            create_test_channel("C123", "alpha", false, false, false, false),
+            create_test_channel("C456", "beta", false, false, false, false),
+        ];
+        cache.save_channels(channels).await.unwrap();
+
+        // "xyz" has no LIKE match in channel names, should fall back to FTS5 and return empty
+        let results = cache.search_channels("xyz", 10).unwrap();
+        assert_eq!(results.len(), 0);
     }
 }

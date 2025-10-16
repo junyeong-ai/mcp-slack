@@ -49,6 +49,8 @@ struct SearchUsersParams {
     query: String,
     #[serde(default = "default_limit")]
     limit: usize,
+    #[serde(default)]
+    include_bots: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,7 +86,7 @@ impl Tool for SearchUsersTool {
 
         let users = self
             .cache
-            .search_users(&params.query, params.limit)
+            .search_users(&params.query, params.limit, params.include_bots)
             .mcp_context("Failed to search users")?;
 
         // Format response with essential user fields
